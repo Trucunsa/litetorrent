@@ -20,24 +20,25 @@ Get `LiteTorrent-Windows-x64.zip` from the [Releases](../../releases) page, unpa
 
 ## What it does
 
-- Adds torrents from a magnet link, a `.torrent` file, drag-and-drop onto the window, or "Open with" / double-click in Explorer (the file path is taken from the command line).
+- Adds torrents from a magnet link, a `.torrent` file, drag-and-drop onto the window, or "Open with" / double-click in Explorer (the file path is taken from the command line). If LiteTorrent is already running, the second launch hands the file to the open window and quits, so there is never more than one window.
+- **Remembers your torrents between runs.** The list, progress and paused state are saved when you close the app (and once a minute), and restored on the next start; nothing is re-checked from scratch.
 - Lets you choose the save folder when adding, and remembers the last one.
 - Shows name, size, progress, download and upload speed, time remaining, peers (seeds) and state.
-- Pause / resume and delete (with or without the downloaded files) for the selected torrent; "Folder" opens the folder that torrent was saved to.
-- **Remembers the task list.** Torrents, their progress and their paused state survive closing the app, a restart, or a crash (progress is saved once a minute and on exit).
-- **One running copy.** Opening another `.torrent` while LiteTorrent is running adds it to the existing window instead of starting a second program. Adding a torrent that is already in the list says so.
-- **Shut down the PC when all downloads finish.** A window in the middle of the screen, on top of everything, counts down 15 seconds with a "Cancel shutdown" button. It only fires for downloads that were still running after you ticked the box — ticking it over an already-complete list does nothing — and never while a torrent is stopped with an error.
+- Pause / resume and delete (with or without the downloaded files) for the selected torrent.
+- **Shut down the PC when all downloads finish**, with a 15-second countdown in a prominent always-on-top window with a "Cancel shutdown" button. A torrent with an error (for example, the disk is full) never counts as finished: the PC will not shut down because of it, and the status bar says why.
+- Scales to the screen: sizes follow the Windows display scale (100–200 % and beyond), per monitor.
+- Shows "Checking files" and "Fetching metadata" states, tells you when a torrent is already in the list, and the Folder button opens the selected torrent's own folder.
 - Russian and English interface, switched by the RU / EN buttons in the top-right corner.
 
 ## What it does not do — read this before relying on it
 
 This is a small project and it is honest about its limits:
 
-- **Lightly tested.** The author has downloaded torrents with it on Windows. Everything else was checked only under Wine: adding from the command line and the add dialog, saving and restoring the list across restarts, handing a torrent to the running copy, the duplicate notice, pause surviving a restart, the delete dialog, the shutdown countdown and its cancel button, and layout at 150 % scaling. There is no automated test suite. Please report what you find.
+- **Lightly tested.** The author downloaded torrents with version 1.0 on Windows; version 1.1 has not yet been tried on real Windows by the author. Beyond that, the builds were only checked under Wine: startup, adding torrents from the command line, a second launch handing over to the first, saving and restoring the list across restarts, the add dialog, the delete dialog, the shutdown countdown window and its Cancel button, language switching, 200 % display scale, and hash-checking existing data up to "Seeding". The "does not shut down on error" rule and the multi-monitor DPI change were written but not exercised. There is no automated test suite. Please report what you find.
 - No choice of individual files inside a torrent, no priorities, no queueing, no scheduler.
 - No speed-limit controls in the interface (see [Hidden settings](#settings-and-where-they-are-stored)).
+- Not registered as the system handler for `.torrent` files or `magnet:` links: pick it once via "Open with" (magnet links from a browser do not open it).
 - No tray icon, no notifications, no auto-update, no portable-mode switch.
-- At most three torrents download at the same time (libtorrent's default); the rest show "Queued" and start on their own.
 - No proxy, VPN binding, or anonymous mode. **Your IP address is visible to peers and trackers**, as with any ordinary BitTorrent client.
 - Left out of the engine to save space: I2P, WebTorrent, super-seeding, share mode, streaming (piece deadlines), BEP 38 mutable torrents, and libtorrent's logging.
 
@@ -57,7 +58,7 @@ Nothing is hidden here either. The app talks only BitTorrent; there is no teleme
 
 ## Settings and where they are stored
 
-Settings live in the registry under `HKEY_CURRENT_USER\Software\LiteTorrent`. The task list lives in `%APPDATA%\LiteTorrent\resume`, one small `.fastresume` file per torrent (its metadata, save folder, pause state and which pieces are done). Nothing is written anywhere else, apart from the files you download. To remove every trace of the app, delete the exe, that registry key and that folder.
+Settings live in the registry under `HKEY_CURRENT_USER\Software\LiteTorrent`. The torrent list is stored as one small `.resume` file per torrent in `%LOCALAPPDATA%\LiteTorrent\torrents`. Nothing is written anywhere else, apart from the files you download. To remove every trace of the app, delete the exe, that registry key and the `%LOCALAPPDATA%\LiteTorrent` folder.
 
 | Value | Type | Meaning |
 |---|---|---|
@@ -72,7 +73,7 @@ Shutting down uses the standard `ExitWindowsEx` call, which closes other program
 ## How it is built
 
 - **Language:** C++17, about 2,700 lines.
-- **Interface:** plain Win32 API with the standard common controls, per-monitor DPI aware (sizes and fonts follow the display scale). No Qt, no .NET, no Electron, no web view.
+- **Interface:** plain Win32 API with the standard common controls. No Qt, no .NET, no Electron, no web view.
 - **Engine:** [libtorrent](https://github.com/arvidn/libtorrent) 2.0.11, compiled from source with unused features switched off.
 - **TLS / hashing:** OpenSSL 3.6.5, static.
 - **Headers only:** Boost 1.92.
@@ -86,12 +87,13 @@ Earlier iterations used Qt 6 and weighed 93 MB unpacked; dropping Qt brought tha
 
 | File | Role |
 |---|---|
-| `src/main.cpp` | Entry point, command-line handling, message loop |
+| `src/main.cpp` | Entry point, single-instance hand-over, message loop |
 | `src/MainWindow.*` | The window: toolbar, list, status bar, timers, drag-and-drop |
 | `src/TorrentListView.*` | Wrapper around the native list control, in-place row updates, progress bar |
 | `src/AddTorrentDialog.*` | "Add torrent" dialog |
 | `src/SessionManager.*` | The only code that touches libtorrent |
 | `src/ShutdownManager.*` | Countdown and shutdown |
+| `src/CountdownDialog.*` | The always-on-top countdown window with the Cancel button |
 | `src/AppSettings.*` | Registry access |
 | `src/Localization.*` | RU / EN string table |
 | `resources/` | Icon, version info, application manifest |

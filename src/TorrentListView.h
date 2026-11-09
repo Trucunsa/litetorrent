@@ -42,6 +42,9 @@ public:
     // language change.
     void retranslate();
 
+    // After a DPI change: re-applies the font and rescales column widths.
+    void applyDpi(int totalWidth);
+
     const TorrentInfo* selected() const;
     std::wstring selectedInfoHash() const;
     void selectByHash(const std::wstring& infoHash);

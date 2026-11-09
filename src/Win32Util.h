@@ -66,76 +66,74 @@ inline std::wstring formatSpeed(int bps)
     return formatBytes(bps) + L"/s";
 }
 
-// H:MM:SS (or M:SS under an hour) -- numeric, so it needs no translation.
-// --- Display scaling ---------------------------------------------------------
-// The manifest declares the app per-monitor DPI aware, so Windows does not
-// stretch the window for us: every pixel measurement in the UI code goes
-// through px(), and fonts are created for the current DPI.
+// --- DPI scaling -----------------------------------------------------------
+// The manifest declares the app per-monitor-DPI aware, so Windows no longer
+// stretches it: every pixel size in the code goes through scale(), and the
+// shared font is rebuilt when the DPI changes.
+inline int& dpiRef() { static int d = 96; return d; }
+inline int dpi() { return dpiRef(); }
+inline int scale(int px) { return MulDiv(px, dpiRef(), 96); }
 
-inline int& currentDpi()
+// DPI of the monitor a window is on (Windows 10 1607+), else the system DPI.
+inline int queryDpi(HWND hwnd)
 {
-    static int dpi = 96;
-    return dpi;
-}
-
-// Converts a size designed at 100 % scaling to the current monitor's scale.
-inline int px(int designPixels)
-{
-    return MulDiv(designPixels, currentDpi(), 96);
-}
-
-struct UiFonts
-{
-    HFONT normal = nullptr;
-    HFONT small_ = nullptr;
-    HFONT large = nullptr;
-    int dpi = 0;
-};
-
-inline UiFonts& uiFonts()
-{
-    static UiFonts f;
-    if (f.dpi != currentDpi()) {
-        // (Old fonts are deleted by setDpi() after every control has
-        // been switched to the new ones.)
-        auto make = [](int size, int weight) {
-            return CreateFontW(-px(size), 0, 0, 0, weight, FALSE, FALSE, FALSE,
-                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                               CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        };
-        f.normal = make(14, FW_NORMAL);
-        f.small_ = make(11, FW_NORMAL);
-        f.large = make(18, FW_SEMIBOLD);
-        f.dpi = currentDpi();
+    using Fn = UINT(WINAPI*)(HWND);
+    static Fn fn = reinterpret_cast<Fn>(reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow")));
+    if (fn && hwnd) {
+        const UINT d = fn(hwnd);
+        if (d)
+            return static_cast<int>(d);
     }
-    return f;
+    HDC dc = GetDC(nullptr);
+    const int d = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
+    if (dc) ReleaseDC(nullptr, dc);
+    return d > 0 ? d : 96;
 }
 
-// Segoe UI has full coverage for the arrows the status bar uses; the stock
-// DEFAULT_GUI_FONT is not guaranteed to.
-inline HFONT uiFont() { return uiFonts().normal; }
-inline HFONT uiSmallFont() { return uiFonts().small_; }
-inline HFONT uiLargeFont() { return uiFonts().large; }
-
-inline BOOL CALLBACK applyFontProc(HWND child, LPARAM font)
+inline HFONT makeFont(int pixels, int weight)
 {
-    SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE);
-    return TRUE;
+    return CreateFontW(-MulDiv(pixels, dpiRef(), 96), 0, 0, 0, weight, FALSE, FALSE, FALSE,
+                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                       CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 }
 
-// Switches to a new DPI: new fonts for every child of `top`, old ones freed.
-inline void setDpi(HWND top, int dpi)
+// Shared UI font (Segoe UI has full Unicode arrow/glyph coverage; the raw
+// DEFAULT_GUI_FONT stock object maps to whatever minimal bitmap font a
+// given Windows install falls back to, which isn't guaranteed to cover
+// the arrow glyphs the status bar uses). One GDI object per DPI value.
+inline HFONT& uiFontRef() { static HFONT f = nullptr; return f; }
+inline HFONT uiFont()
 {
-    if (dpi <= 0 || dpi == currentDpi())
-        return;
-    const UiFonts old = uiFonts();
-    currentDpi() = dpi;
-    const HFONT font = uiFont();
-    if (top)
-        EnumChildWindows(top, applyFontProc, reinterpret_cast<LPARAM>(font));
-    if (old.normal) DeleteObject(old.normal);
-    if (old.small_) DeleteObject(old.small_);
-    if (old.large) DeleteObject(old.large);
+    if (!uiFontRef())
+        uiFontRef() = makeFont(14, FW_NORMAL);
+    return uiFontRef();
+}
+
+// Switches the scale and returns the previous font; the caller re-applies
+// uiFont() to its controls and then deletes the returned handle.
+inline HFONT setDpi(int newDpi)
+{
+    dpiRef() = newDpi;
+    HFONT old = uiFontRef();
+    uiFontRef() = nullptr;
+    return old;
+}
+
+// Per-user data folder %LOCALAPPDATA%\LiteTorrent (created on demand).
+inline std::wstring dataDir()
+{
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    std::wstring dir = (n > 0 && n < MAX_PATH) ? std::wstring(buf) : std::wstring();
+    if (dir.empty()) {
+        n = GetTempPathW(MAX_PATH, buf);
+        dir = (n > 0 && n < MAX_PATH) ? std::wstring(buf) : L".";
+        while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back();
+    }
+    dir += L"\\LiteTorrent";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir;
 }
 
 inline std::wstring formatEta(int64_t remainingBytes, int downloadRateBps)

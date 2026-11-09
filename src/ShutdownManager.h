@@ -16,7 +16,6 @@ public:
     static constexpr int kCountdownSeconds = 15;
 
     bool isActive() const { return m_active; }
-    int secondsLeft() const { return m_secondsLeft; }
 
     // Call when SessionManager::allDownloadsFinished() becomes true.
     void arm();
