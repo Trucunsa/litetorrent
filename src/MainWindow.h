@@ -19,6 +19,10 @@ public:
 
     HWND hwnd() const { return m_hwnd; }
 
+    // Window class name; a second copy of the app uses it to find the
+    // running one and hand its command-line argument over.
+    static const wchar_t* className();
+
     // For a .torrent path (or magnet link) handed to the process on the
     // command line -- Windows launches the app this way when a .torrent
     // file is double-clicked or opened with "Open with -> LiteTorrent".
@@ -52,6 +56,11 @@ private:
     void retranslateUi();
     void checkShutdownCondition();
     void layoutControls();
+    void cancelShutdownByUser();
+    void showShutdownPrompt(int seconds);
+    void updateShutdownPrompt(int seconds);
+    void closeShutdownPrompt();
+    void bringToFront();
 
     HWND m_hwnd = nullptr;
     HINSTANCE m_hInst = nullptr;
@@ -72,4 +81,14 @@ private:
 
     HWND m_statusStatic = nullptr;
     HWND m_shutdownCheck = nullptr;
+
+    // The visible countdown window (and its two children).
+    HWND m_shutdownPrompt = nullptr;
+    HWND m_shutdownPromptText = nullptr;
+    HWND m_shutdownPromptButton = nullptr;
+
+    // The shutdown box only fires for downloads that were still running
+    // at some point after it was ticked -- never for a list that was
+    // already complete when the user ticked it.
+    bool m_sawUnfinished = false;
 };

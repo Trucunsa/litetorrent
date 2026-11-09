@@ -35,6 +35,9 @@ public:
         StateDownloading,
         StateSeeding,
         StatePaused,
+        StateChecking,
+        StateQueued,
+        StateMetadata,
         StateErrorPrefix,
 
         // Status bar / shutdown. Tokens @DOWN@/@UP@/@COUNT@/@SECONDS@ are
@@ -47,6 +50,10 @@ public:
         ShuttingDownMessageWithHint,
 
         ShutdownCheckbox,
+        ShutdownPromptTitle,
+        ShutdownPromptText,          // contains @SECONDS@
+        ShutdownPromptCancel,
+        DuplicateTorrent,
 
         // Empty state
         EmptyStateTitle,

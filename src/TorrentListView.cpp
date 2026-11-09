@@ -14,6 +14,12 @@ std::wstring stateText(const TorrentInfo& t)
         return loc.t(Localization::StateErrorPrefix) + t.errorMessage;
     if (t.isPaused)
         return loc.t(Localization::StatePaused);
+    if (t.isChecking)
+        return loc.t(Localization::StateChecking);
+    if (t.isQueued)
+        return loc.t(Localization::StateQueued);
+    if (t.needsMetadata)
+        return loc.t(Localization::StateMetadata);
     if (t.isFinished)
         return loc.t(Localization::StateSeeding);
     return loc.t(Localization::StateDownloading);
@@ -51,7 +57,7 @@ void TorrentListView::create(HWND parent, HINSTANCE hInst, int id)
         LVCOLUMNW col{};
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         col.pszText = const_cast<LPWSTR>(L"");
-        col.cx = kColWidths[c];
+        col.cx = win::px(kColWidths[c]);
         col.iSubItem = c;
         ListView_InsertColumn(m_hwnd, c, &col);
     }
@@ -69,12 +75,17 @@ void TorrentListView::layout(int x, int y, int w, int h)
     // (fixed-width) columns don't use, mirroring the old
     // QHeaderView::Stretch policy on column 0.
     int fixedTotal = 0;
-    for (int c = 1; c < ColCount; ++c)
-        fixedTotal += kColWidths[c];
-    const int scrollbarAllowance = 24;
+    for (int c = 1; c < ColCount; ++c) {
+        const int cw = win::px(kColWidths[c]);
+        fixedTotal += cw;
+        // Re-applied on every layout so a move to a monitor with another
+        // scale factor resizes the columns too.
+        ListView_SetColumnWidth(m_hwnd, c, cw);
+    }
+    const int scrollbarAllowance = win::px(24);
     int nameWidth = w - fixedTotal - scrollbarAllowance;
-    if (nameWidth < 140)
-        nameWidth = 140;
+    if (nameWidth < win::px(140))
+        nameWidth = win::px(140);
     ListView_SetColumnWidth(m_hwnd, ColName, nameWidth);
 }
 
@@ -109,7 +120,7 @@ void TorrentListView::setRowText(int row, const TorrentInfo& t, bool force)
     std::wstring progress = progressText(t);
     std::wstring down = win::formatSpeed(t.downloadRateBps);
     std::wstring up = win::formatSpeed(t.uploadRateBps);
-    std::wstring remaining = (t.isPaused || t.hasError || t.isFinished)
+    std::wstring remaining = (t.isPaused || t.isQueued || t.isChecking || t.hasError || t.isFinished)
         ? L"-" : win::formatEta(t.totalSize - t.downloaded, t.downloadRateBps);
     std::wstring peers = peersText(t);
     std::wstring state = stateText(t);
@@ -221,7 +232,7 @@ LRESULT TorrentListView::handleCustomDraw(NMLVCUSTOMDRAW* cd)
 
         RECT rc{};
         ListView_GetSubItemRect(m_hwnd, row, ColProgress, LVIR_BOUNDS, &rc);
-        rc.left += 4; rc.right -= 6; rc.top += 6; rc.bottom -= 6;
+        rc.left += win::px(4); rc.right -= win::px(6); rc.top += win::px(6); rc.bottom -= win::px(6);
         if (rc.right <= rc.left || rc.bottom <= rc.top)
             return CDRF_DODEFAULT;
 

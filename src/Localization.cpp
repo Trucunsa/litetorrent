@@ -25,6 +25,9 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
     /* StateDownloading            */ {L"Загрузка", L"Downloading"},
     /* StateSeeding                */ {L"Раздача", L"Seeding"},
     /* StatePaused                 */ {L"Пауза", L"Paused"},
+    /* StateChecking               */ {L"Проверка", L"Checking"},
+    /* StateQueued                 */ {L"В очереди", L"Queued"},
+    /* StateMetadata               */ {L"Получение метаданных", L"Fetching metadata"},
     /* StateErrorPrefix            */ {L"Ошибка: ", L"Error: "},
 
     /* StatusLine                  */ {L"↓ @DOWN@   ↑ @UP@   @COUNT@ задач",
@@ -37,6 +40,11 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
                                          L"(add a torrent or uncheck the box to cancel)"},
 
     /* ShutdownCheckbox            */ {L"Выключить ПК после завершения загрузок", L"Shut down PC when all downloads finish"},
+    /* ShutdownPromptTitle         */ {L"Выключение компьютера", L"Shutting down"},
+    /* ShutdownPromptText          */ {L"Все загрузки завершены.\nКомпьютер выключится через @SECONDS@ с.",
+                                         L"All downloads have finished.\nThe PC will shut down in @SECONDS@ s."},
+    /* ShutdownPromptCancel        */ {L"Отменить выключение", L"Cancel shutdown"},
+    /* DuplicateTorrent            */ {L"Этот торрент уже есть в списке.", L"This torrent is already in the list."},
 
     /* EmptyStateTitle             */ {L"Пока нет задач", L"No tasks yet"},
     /* EmptyStateHint              */ {L"Перетащите .torrent-файл в это окно или добавьте по magnet-ссылке",

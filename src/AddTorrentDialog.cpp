@@ -31,22 +31,6 @@ struct DialogState
     bool done = false;
 };
 
-HFONT smallFont()
-{
-    static HFONT font = CreateFontW(-11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    return font;
-}
-
-HFONT boldFont()
-{
-    static HFONT font = CreateFontW(-15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    return font;
-}
-
 void pickFile(DialogState* st)
 {
     const Localization& loc = Localization::instance();
@@ -138,10 +122,11 @@ LRESULT CALLBACK dialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         const Localization& loc = Localization::instance();
         HINSTANCE hInst = cs->hInstance;
+        using win::px;
 
         auto makeStatic = [&](const std::wstring& text, int x, int y, int w, int h, HFONT font = nullptr) {
             HWND h2 = CreateWindowExW(0, L"STATIC", text.c_str(), WS_CHILD | WS_VISIBLE,
-                                       x, y, w, h, hwnd, nullptr, hInst, nullptr);
+                                       px(x), px(y), px(w), px(h), hwnd, nullptr, hInst, nullptr);
             SendMessageW(h2, WM_SETFONT, reinterpret_cast<WPARAM>(font ? font : win::uiFont()), TRUE);
             return h2;
         };
@@ -150,36 +135,36 @@ LRESULT CALLBACK dialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         st->magnetEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-            20, 38, 400, 24, hwnd, reinterpret_cast<HMENU>(IDC_MAGNET_EDIT), hInst, nullptr);
+            px(20), px(38), px(400), px(24), hwnd, reinterpret_cast<HMENU>(IDC_MAGNET_EDIT), hInst, nullptr);
         SendMessageW(st->magnetEdit, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
         st->chooseFileBtn = CreateWindowExW(0, L"BUTTON", loc.t(Localization::AddDialogChooseFile).c_str(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-            20, 72, 400, 28, hwnd, reinterpret_cast<HMENU>(IDC_CHOOSE_FILE), hInst, nullptr);
+            px(20), px(72), px(400), px(28), hwnd, reinterpret_cast<HMENU>(IDC_CHOOSE_FILE), hInst, nullptr);
         SendMessageW(st->chooseFileBtn, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
         makeStatic(loc.t(Localization::AddDialogSaveToLabel), 20, 114, 380, 18);
 
         st->folderStatic = CreateWindowExW(WS_EX_CLIENTEDGE, L"STATIC", st->saveDir.c_str(),
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_PATHELLIPSIS | SS_NOTIFY,
-            20, 136, 300, 24, hwnd, reinterpret_cast<HMENU>(IDC_FOLDER_STATIC), hInst, nullptr);
+            px(20), px(136), px(300), px(24), hwnd, reinterpret_cast<HMENU>(IDC_FOLDER_STATIC), hInst, nullptr);
         SendMessageW(st->folderStatic, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
         st->changeFolderBtn = CreateWindowExW(0, L"BUTTON", loc.t(Localization::AddDialogChangeButton).c_str(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-            326, 136, 94, 24, hwnd, reinterpret_cast<HMENU>(IDC_CHANGE_FOLDER), hInst, nullptr);
+            px(326), px(136), px(94), px(24), hwnd, reinterpret_cast<HMENU>(IDC_CHANGE_FOLDER), hInst, nullptr);
         SendMessageW(st->changeFolderBtn, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
-        makeStatic(loc.t(Localization::AddDialogHint), 20, 168, 400, 32, smallFont());
+        makeStatic(loc.t(Localization::AddDialogHint), 20, 168, 400, 32, win::uiSmallFont());
 
         st->cancelBtn = CreateWindowExW(0, L"BUTTON", loc.t(Localization::AddDialogCancel).c_str(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-            236, 216, 90, 28, hwnd, reinterpret_cast<HMENU>(IDC_CANCEL), hInst, nullptr);
+            px(236), px(216), px(90), px(28), hwnd, reinterpret_cast<HMENU>(IDC_CANCEL), hInst, nullptr);
         SendMessageW(st->cancelBtn, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
         st->addBtn = CreateWindowExW(0, L"BUTTON", loc.t(Localization::AddDialogConfirm).c_str(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-            330, 216, 90, 28, hwnd, reinterpret_cast<HMENU>(IDC_ADD), hInst, nullptr);
+            px(330), px(216), px(90), px(28), hwnd, reinterpret_cast<HMENU>(IDC_ADD), hInst, nullptr);
         SendMessageW(st->addBtn, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
 
         SetFocus(st->magnetEdit);
@@ -241,7 +226,7 @@ bool showAddTorrentDialog(HWND owner, HINSTANCE hInst, AddTorrentResult* result)
 
     RECT ownerRect{};
     GetWindowRect(owner, &ownerRect);
-    const int w = 440, h = 284;
+    const int w = win::px(440), h = win::px(284);
     const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - w) / 2;
     const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - h) / 2;
 

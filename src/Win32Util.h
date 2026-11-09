@@ -67,17 +67,75 @@ inline std::wstring formatSpeed(int bps)
 }
 
 // H:MM:SS (or M:SS under an hour) -- numeric, so it needs no translation.
-// Shared UI font (Segoe UI has full Unicode arrow/glyph coverage; the raw
-// DEFAULT_GUI_FONT stock object maps to whatever minimal bitmap font a
-// given Windows install falls back to, which isn't guaranteed to cover
-// the ↓/↑ glyphs the status bar uses). Created once, lives for the
-// process's lifetime -- a single GDI font object is negligible.
-inline HFONT uiFont()
+// --- Display scaling ---------------------------------------------------------
+// The manifest declares the app per-monitor DPI aware, so Windows does not
+// stretch the window for us: every pixel measurement in the UI code goes
+// through px(), and fonts are created for the current DPI.
+
+inline int& currentDpi()
 {
-    static HFONT font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    return font;
+    static int dpi = 96;
+    return dpi;
+}
+
+// Converts a size designed at 100 % scaling to the current monitor's scale.
+inline int px(int designPixels)
+{
+    return MulDiv(designPixels, currentDpi(), 96);
+}
+
+struct UiFonts
+{
+    HFONT normal = nullptr;
+    HFONT small_ = nullptr;
+    HFONT large = nullptr;
+    int dpi = 0;
+};
+
+inline UiFonts& uiFonts()
+{
+    static UiFonts f;
+    if (f.dpi != currentDpi()) {
+        // (Old fonts are deleted by setDpi() after every control has
+        // been switched to the new ones.)
+        auto make = [](int size, int weight) {
+            return CreateFontW(-px(size), 0, 0, 0, weight, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                               CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        };
+        f.normal = make(14, FW_NORMAL);
+        f.small_ = make(11, FW_NORMAL);
+        f.large = make(18, FW_SEMIBOLD);
+        f.dpi = currentDpi();
+    }
+    return f;
+}
+
+// Segoe UI has full coverage for the arrows the status bar uses; the stock
+// DEFAULT_GUI_FONT is not guaranteed to.
+inline HFONT uiFont() { return uiFonts().normal; }
+inline HFONT uiSmallFont() { return uiFonts().small_; }
+inline HFONT uiLargeFont() { return uiFonts().large; }
+
+inline BOOL CALLBACK applyFontProc(HWND child, LPARAM font)
+{
+    SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE);
+    return TRUE;
+}
+
+// Switches to a new DPI: new fonts for every child of `top`, old ones freed.
+inline void setDpi(HWND top, int dpi)
+{
+    if (dpi <= 0 || dpi == currentDpi())
+        return;
+    const UiFonts old = uiFonts();
+    currentDpi() = dpi;
+    const HFONT font = uiFont();
+    if (top)
+        EnumChildWindows(top, applyFontProc, reinterpret_cast<LPARAM>(font));
+    if (old.normal) DeleteObject(old.normal);
+    if (old.small_) DeleteObject(old.small_);
+    if (old.large) DeleteObject(old.large);
 }
 
 inline std::wstring formatEta(int64_t remainingBytes, int downloadRateBps)

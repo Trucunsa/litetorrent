@@ -23,21 +23,21 @@ Get `LiteTorrent-Windows-x64.zip` from the [Releases](../../releases) page, unpa
 - Adds torrents from a magnet link, a `.torrent` file, drag-and-drop onto the window, or "Open with" / double-click in Explorer (the file path is taken from the command line).
 - Lets you choose the save folder when adding, and remembers the last one.
 - Shows name, size, progress, download and upload speed, time remaining, peers (seeds) and state.
-- Pause / resume and delete (with or without the downloaded files) for the selected torrent.
-- **Shut down the PC when all downloads finish**, with a 15-second countdown that is cancelled by unticking the box or adding a torrent.
+- Pause / resume and delete (with or without the downloaded files) for the selected torrent; "Folder" opens the folder that torrent was saved to.
+- **Remembers the task list.** Torrents, their progress and their paused state survive closing the app, a restart, or a crash (progress is saved once a minute and on exit).
+- **One running copy.** Opening another `.torrent` while LiteTorrent is running adds it to the existing window instead of starting a second program. Adding a torrent that is already in the list says so.
+- **Shut down the PC when all downloads finish.** A window in the middle of the screen, on top of everything, counts down 15 seconds with a "Cancel shutdown" button. It only fires for downloads that were still running after you ticked the box — ticking it over an already-complete list does nothing — and never while a torrent is stopped with an error.
 - Russian and English interface, switched by the RU / EN buttons in the top-right corner.
 
 ## What it does not do — read this before relying on it
 
 This is a small project and it is honest about its limits:
 
-- **The task list is not saved between runs.** Closing the app forgets the list. Downloaded data stays on disk; adding the same torrent again with the same folder re-checks the files and continues from where it stopped.
-- **Lightly tested.** The author has downloaded torrents with it on Windows. Beyond that, the build was only checked under Wine: startup, adding a torrent from the command line, the add dialog, language switching, selection, and hash-checking existing data up to "Seeding". There is no automated test suite. Please report what you find.
+- **Lightly tested.** The author has downloaded torrents with it on Windows. Everything else was checked only under Wine: adding from the command line and the add dialog, saving and restoring the list across restarts, handing a torrent to the running copy, the duplicate notice, pause surviving a restart, the delete dialog, the shutdown countdown and its cancel button, and layout at 150 % scaling. There is no automated test suite. Please report what you find.
 - No choice of individual files inside a torrent, no priorities, no queueing, no scheduler.
 - No speed-limit controls in the interface (see [Hidden settings](#settings-and-where-they-are-stored)).
-- The "Folder" button opens the default save folder, not the folder of the selected torrent, if you saved that one somewhere else.
-- The delete confirmation uses a standard Windows message box, so its Yes / No / Cancel buttons follow the Windows language, not the app's RU / EN switch. The question text explains what Yes and No mean.
 - No tray icon, no notifications, no auto-update, no portable-mode switch.
+- At most three torrents download at the same time (libtorrent's default); the rest show "Queued" and start on their own.
 - No proxy, VPN binding, or anonymous mode. **Your IP address is visible to peers and trackers**, as with any ordinary BitTorrent client.
 - Left out of the engine to save space: I2P, WebTorrent, super-seeding, share mode, streaming (piece deadlines), BEP 38 mutable torrents, and libtorrent's logging.
 
@@ -53,11 +53,11 @@ Nothing is hidden here either. The app talks only BitTorrent; there is no teleme
 | TCP / uTP mixed mode | `prefer_tcp` |
 | Seeding | yes — finished torrents keep uploading until paused, deleted, or the app is closed |
 | HTTPS trackers and web seeds | supported (OpenSSL is linked in) |
-| User agent | `LiteTorrent/0.1.0` |
+| User agent | `LiteTorrent/1.1.0` |
 
 ## Settings and where they are stored
 
-Settings live in the registry under `HKEY_CURRENT_USER\Software\LiteTorrent`. Nothing is written anywhere else, apart from the files you download. To remove every trace of the app, delete the exe and that registry key.
+Settings live in the registry under `HKEY_CURRENT_USER\Software\LiteTorrent`. The task list lives in `%APPDATA%\LiteTorrent\resume`, one small `.fastresume` file per torrent (its metadata, save folder, pause state and which pieces are done). Nothing is written anywhere else, apart from the files you download. To remove every trace of the app, delete the exe, that registry key and that folder.
 
 | Value | Type | Meaning |
 |---|---|---|
@@ -71,8 +71,8 @@ Shutting down uses the standard `ExitWindowsEx` call, which closes other program
 
 ## How it is built
 
-- **Language:** C++17, about 2,200 lines.
-- **Interface:** plain Win32 API with the standard common controls. No Qt, no .NET, no Electron, no web view.
+- **Language:** C++17, about 2,700 lines.
+- **Interface:** plain Win32 API with the standard common controls, per-monitor DPI aware (sizes and fonts follow the display scale). No Qt, no .NET, no Electron, no web view.
 - **Engine:** [libtorrent](https://github.com/arvidn/libtorrent) 2.0.11, compiled from source with unused features switched off.
 - **TLS / hashing:** OpenSSL 3.6.5, static.
 - **Headers only:** Boost 1.92.
