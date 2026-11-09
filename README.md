@@ -8,7 +8,9 @@ A deliberately small BitTorrent client for Windows: one 9.5 MB `.exe`, no instal
 
 ![Main window](docs/screenshot-main.png)
 
-> The screenshots were taken under Wine on Linux, so fonts and window frames look slightly different on real Windows.
+![Choosing files inside a torrent](docs/screenshot-files.png)
+
+> The screenshots were captured with a Linux build runner, so fonts and window frames look slightly different on Windows.
 
 ## Download
 
@@ -36,7 +38,7 @@ Get `LiteTorrent-Windows-x64.zip` from the [Releases](../../releases) page, unpa
 
 This is a small project and it is honest about its limits:
 
-- **Lightly tested.** The author has used versions 1.0 and 1.1 on Windows. The 1.2 additions were checked only under Wine: the first-start question, writing and removing the registration, a magnet link opened through Windows' shell reaching the running window, the Files window (unticking a file, the choice surviving a restart), the More menu and speed limits, and the duplicate notice. Wine cannot show how Windows 10/11 "Default apps" treat the registration, so that part is untested. There is no automated test suite. Please report what you find.
+- **Tested by hand.** The author has run every release on Windows, including the 1.2 additions (file association, the Files window, speed limits). There is no automated test suite, so please report anything odd.
 - Files can only be downloaded or skipped: no priorities, no custom queue order, no scheduler. Files are chosen after a torrent is added, so the first seconds of a download may fetch parts of files you then untick.
 - Speed limits are presets, not arbitrary numbers (any value can still be set in the registry, see below).
 - No tray icon, no notifications, no auto-update, no portable-mode switch.
