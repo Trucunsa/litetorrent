@@ -70,6 +70,32 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
     /* YesButton                   */ {L"Да, с файлами", L"Yes, with files"},
     /* NoButton                    */ {L"Нет, только из списка", L"No, list only"},
     /* ChooseFolderTitle           */ {L"Папка для сохранения", L"Save-to folder"},
+
+    /* FilesButton                 */ {L"Файлы", L"Files"},
+    /* MoreButton                  */ {L"Ещё", L"More"},
+    /* FilesDialogTitle            */ {L"Файлы", L"Files"},
+    /* FilesColName                */ {L"Файл", L"File"},
+    /* FilesSelectAll              */ {L"Все", L"All"},
+    /* FilesSelectNone             */ {L"Ни одного", L"None"},
+    /* FilesOk                     */ {L"Готово", L"OK"},
+    /* FilesSummary                */ {L"Выбрано @COUNT@ из @ALL@, @SIZE@", L"@COUNT@ of @ALL@ selected, @SIZE@"},
+    /* FilesNotReady               */ {L"Список файлов появится, когда будут получены метаданные торрента. Попробуйте через минуту.",
+                                         L"The file list appears once the torrent's metadata has arrived. Try again in a minute."},
+    /* MenuDownloadLimit           */ {L"Ограничить загрузку", L"Limit download"},
+    /* MenuUploadLimit             */ {L"Ограничить отдачу", L"Limit upload"},
+    /* MenuNoLimit                 */ {L"Без ограничения", L"No limit"},
+    /* MenuOpenWith                */ {L"Открывать .torrent и magnet-ссылки в LiteTorrent", L"Open .torrent files and magnet links with LiteTorrent"},
+    /* AssocTitle                  */ {L"LiteTorrent", L"LiteTorrent"},
+    /* AssocQuestion               */ {L"Открывать файлы .torrent и magnet-ссылки в LiteTorrent?\n\nЭто можно изменить позже в меню «Ещё».",
+                                         L"Open .torrent files and magnet links with LiteTorrent?\n\nYou can change this later in the \"More\" menu."},
+    /* AssocYes                    */ {L"Да", L"Yes"},
+    /* AssocNo                     */ {L"Нет", L"No"},
+    /* AssocTakenText              */ {L"Сейчас .torrent или magnet-ссылки открывает другая программа. Windows не даёт сменить это без вас: "
+                                         L"в окне «Приложения по умолчанию» выберите LiteTorrent для .torrent и для MAGNET.",
+                                         L"Another program currently opens .torrent files or magnet links. Windows won't let an app change that by itself: "
+                                         L"in \"Default apps\", choose LiteTorrent for .torrent and for MAGNET."},
+    /* AssocOpenSettings           */ {L"Открыть параметры Windows", L"Open Windows Settings"},
+    /* LimitTag                    */ {L"(макс. @LIMIT@)", L"(max @LIMIT@)"},
 };
 }
 

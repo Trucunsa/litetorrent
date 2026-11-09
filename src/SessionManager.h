@@ -34,6 +34,15 @@ struct TorrentInfo
     bool needsMetadata = false;      // magnet link still fetching its file list
 };
 
+// One file inside a torrent, for the "Files" window.
+struct TorrentFileEntry
+{
+    int index = 0;                   // libtorrent's file index
+    std::wstring path;               // path inside the torrent
+    int64_t size = 0;
+    bool wanted = true;              // false = skipped (priority 0)
+};
+
 // Owns the single libtorrent::session for the process. All add/remove/
 // pause/resume calls and the periodic alert pump go through here; the UI
 // never touches libtorrent directly.
@@ -57,6 +66,12 @@ public:
     void pauseTorrent(const std::wstring& infoHash);
     void resumeTorrent(const std::wstring& infoHash);
     void pauseAll();
+
+    // The files of a torrent whose metadata is known (empty otherwise).
+    // Padding files that only exist for alignment are left out.
+    std::vector<TorrentFileEntry> files(const std::wstring& infoHash) const;
+    // Downloads only the files marked `wanted`; the others are skipped.
+    void setWantedFiles(const std::wstring& infoHash, const std::vector<TorrentFileEntry>& files);
 
     const std::vector<TorrentInfo>& torrents() const { return m_torrents; }
 

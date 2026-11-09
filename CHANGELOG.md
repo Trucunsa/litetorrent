@@ -1,5 +1,25 @@
 # Changelog / История изменений
 
+## 1.2.0
+
+**English**
+
+- Optionally opens `.torrent` files and `magnet:` links: asked once on the first start, switchable under **More**. Per-user registration (no admin rights); if another program owns them, LiteTorrent says so and offers to open Settings → Default apps.
+- **Files** button: choose which files of a torrent to download. The choice is saved.
+- **More** menu with download and upload speed limits; an active limit is shown in the status bar. Limits are now counted in KiB/s (1024 bytes), matching the speeds shown.
+- Fixed a possible crash: the "already in the list" message was shown while the engine's events were being processed, and the timer could re-enter that processing behind the message box.
+- A torrent handed over by a second copy is added after the hand-over completes, so that copy never waits behind a message box.
+- Releases are now built by GitHub Actions from the tagged commit; the release notes link the build log and list the exe's SHA-256.
+
+**Русский**
+
+- По желанию открывает файлы `.torrent` и ссылки `magnet:`: вопрос один раз при первом запуске, переключается в меню **Ещё**. Регистрация для текущего пользователя, без прав администратора; если их занимает другая программа, LiteTorrent сообщит об этом и предложит открыть «Параметры → Приложения по умолчанию».
+- Кнопка **Файлы**: выбор, какие файлы торрента скачивать. Выбор сохраняется.
+- Меню **Ещё** с ограничением скорости загрузки и отдачи; действующее ограничение видно в строке состояния. Ограничения теперь считаются в КиБ/с (1024 байта), как и показанные скорости.
+- Исправлено возможное падение: сообщение «уже в списке» показывалось во время разбора событий движка, и таймер мог повторно войти в этот разбор, пока окно сообщения открыто.
+- Торрент, переданный второй копией программы, добавляется после завершения передачи, поэтому та копия не ждёт за окном сообщения.
+- Релизы теперь собирает GitHub Actions из помеченного коммита; в описании релиза есть ссылка на журнал сборки и SHA-256 exe.
+
 ## 1.1.0
 
 **English**

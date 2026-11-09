@@ -6,6 +6,8 @@
 #include "AppSettings.h"
 #include "TorrentListView.h"
 #include <shellapi.h> // HDROP
+#include <utility>
+#include <vector>
 
 // The app's single window. Plain Win32: no Qt, no moc, no signals/slots --
 // every reaction (button clicks, selection changes, timer ticks) is
@@ -43,6 +45,13 @@ private:
     void onPauseResumeClicked();
     void onDeleteClicked();
     void onOpenFolderClicked();
+    void onFilesClicked();
+    void onMoreClicked();
+    void onMenuCommand(int id);
+    void setFileAssociation(bool on);
+    void askAboutFileAssociation();
+    void runDeferred();
+    void postDeferred();
     void onTorrentsChanged();
     void onLanguageButtonClicked(bool english);
 
@@ -75,6 +84,8 @@ private:
     HWND m_pauseResumeBtn = nullptr;
     HWND m_deleteBtn = nullptr;
     HWND m_openFolderBtn = nullptr;
+    HWND m_filesBtn = nullptr;
+    HWND m_moreBtn = nullptr;
 
     HWND m_langRuBtn = nullptr;
     HWND m_langEnBtn = nullptr;
@@ -91,4 +102,12 @@ private:
     // at some point after it was ticked -- never for a list that was
     // already complete when the user ticked it.
     bool m_sawUnfinished = false;
+
+    // Work that must not run in the middle of libtorrent's alert loop or
+    // inside another process's SendMessage: message boxes, adding torrents
+    // handed over by a second copy, the one-time association question.
+    std::vector<std::wstring> m_pendingSources;
+    std::vector<std::pair<bool, std::wstring>> m_pendingErrors; // {duplicate, message}
+    bool m_pendingAssocQuestion = false;
+    bool m_deferredPosted = false;
 };

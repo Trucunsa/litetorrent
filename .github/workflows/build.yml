@@ -1,0 +1,69 @@
+# Builds litetorrent.exe from this repository on GitHub's own servers, so
+# anyone can see that the published exe comes from exactly this source.
+#
+# - every push and pull request: build, and attach the zip to the run
+#   (Actions tab -> the run -> "Artifacts");
+# - a pushed tag such as v1.2.0: also create the GitHub Release with the zip,
+#   using release-notes/<tag>.md as its text and adding the exe's SHA-256.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only to create the release on tags
+
+jobs:
+  windows-x64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the MinGW-w64 cross compiler (posix threads)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix \
+                                  binutils-mingw-w64-x86-64 cmake ninja-build zstd zip
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          x86_64-w64-mingw32-g++ --version
+
+      - name: Fetch Boost and OpenSSL (pinned MSYS2 packages, checksum-verified)
+        run: ci/fetch-sysroot.sh "$RUNNER_TEMP/sysroot"
+
+      - name: Build libtorrent and LiteTorrent
+        run: SYSROOT="$RUNNER_TEMP/sysroot/mingw64" ./build.sh
+
+      - name: Package
+        run: ci/package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiteTorrent-Windows-x64
+          path: |
+            dist/LiteTorrent-Windows-x64.zip
+            dist/litetorrent.exe.sha256
+
+      - name: Publish the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="release-notes/${GITHUB_REF_NAME}.md"
+          test -f "$notes" || { echo "missing $notes"; exit 1; }
+          {
+            cat "$notes"
+            echo
+            echo "---"
+            echo
+            echo "Built by GitHub Actions from commit ${GITHUB_SHA} ([build log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}))."
+            echo
+            echo "SHA-256 of \`litetorrent.exe\`:"
+            echo "\`$(cut -d' ' -f1 dist/litetorrent.exe.sha256)\`"
+          } > dist/notes.md
+          gh release create "$GITHUB_REF_NAME" dist/LiteTorrent-Windows-x64.zip \
+            --title "LiteTorrent ${GITHUB_REF_NAME#v}" --notes-file dist/notes.md

@@ -164,3 +164,13 @@ void AppSettings::setLanguage(const std::wstring& code)
 {
     writeString(L"Language", code);
 }
+
+int AppSettings::fileAssociation() const
+{
+    return readInt(L"FileAssociation", -1);
+}
+
+void AppSettings::setFileAssociation(int state)
+{
+    writeInt(L"FileAssociation", state);
+}

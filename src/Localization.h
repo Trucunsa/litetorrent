@@ -81,6 +81,28 @@ public:
         NoButton,
         ChooseFolderTitle,
 
+        // 1.2: Files window, "More" menu, file associations
+        FilesButton,
+        MoreButton,
+        FilesDialogTitle,
+        FilesColName,
+        FilesSelectAll,
+        FilesSelectNone,
+        FilesOk,
+        FilesSummary,                // "@COUNT@ of @ALL@ files, @SIZE@"
+        FilesNotReady,
+        MenuDownloadLimit,
+        MenuUploadLimit,
+        MenuNoLimit,
+        MenuOpenWith,
+        AssocTitle,
+        AssocQuestion,
+        AssocYes,
+        AssocNo,
+        AssocTakenText,
+        AssocOpenSettings,
+        LimitTag,                    // " (max @LIMIT@)"
+
         KeyCount
     };
 

@@ -13,6 +13,8 @@
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/write_resume_data.hpp>
+#include <libtorrent/download_priority.hpp>
+#include <libtorrent/file_storage.hpp>
 
 #include <fstream>
 #include <iterator>
@@ -174,7 +176,7 @@ void SessionManager::applySessionDefaults()
     // Reasonable, invisible-to-the-user defaults. Nothing here is
     // exposed in the UI -- the whole point of "simple" is that the
     // user never has to look at this.
-    pack.set_str(lt::settings_pack::user_agent, "LiteTorrent/1.1.0");
+    pack.set_str(lt::settings_pack::user_agent, "LiteTorrent/1.2.0");
     pack.set_bool(lt::settings_pack::enable_dht, true);
     pack.set_bool(lt::settings_pack::enable_lsd, true);
     pack.set_bool(lt::settings_pack::enable_upnp, true);
@@ -280,17 +282,62 @@ void SessionManager::pauseAll()
     m_session->pause();
 }
 
+std::vector<TorrentFileEntry> SessionManager::files(const std::wstring& infoHash) const
+{
+    std::vector<TorrentFileEntry> out;
+    for (const auto& t : m_torrents) {
+        if (t.infoHash != infoHash || !t.handle.is_valid())
+            continue;
+        std::shared_ptr<const lt::torrent_info> ti = t.handle.torrent_file();
+        if (!ti)
+            break; // magnet link still fetching its file list
+        const lt::file_storage& fs = ti->files();
+        const std::vector<lt::download_priority_t> prio = t.handle.get_file_priorities();
+        for (const lt::file_index_t i : fs.file_range()) {
+            if (fs.pad_file_at(i))
+                continue;
+            TorrentFileEntry e;
+            e.index = static_cast<int>(i);
+            e.path = win::utf8ToWide(fs.file_path(i));
+            e.size = fs.file_size(i);
+            const size_t k = static_cast<size_t>(static_cast<int>(i));
+            e.wanted = k >= prio.size() || prio[k] != lt::dont_download;
+            out.push_back(std::move(e));
+        }
+        break;
+    }
+    return out;
+}
+
+void SessionManager::setWantedFiles(const std::wstring& infoHash, const std::vector<TorrentFileEntry>& files)
+{
+    for (auto& t : m_torrents) {
+        if (t.infoHash != infoHash || !t.handle.is_valid())
+            continue;
+        std::vector<lt::download_priority_t> prio = t.handle.get_file_priorities();
+        for (const auto& f : files) {
+            const size_t k = static_cast<size_t>(f.index);
+            if (k >= prio.size())
+                prio.resize(k + 1, lt::default_priority);
+            prio[k] = f.wanted ? lt::default_priority : lt::dont_download;
+        }
+        t.handle.prioritize_files(prio);
+        m_ticksSinceSave = 1000; // remember the choice right away
+        break;
+    }
+}
+
 void SessionManager::setDownloadLimitKBs(int kbs)
 {
     lt::settings_pack pack;
-    pack.set_int(lt::settings_pack::download_rate_limit, kbs > 0 ? kbs * 1000 : 0);
+    pack.set_int(lt::settings_pack::download_rate_limit, kbs > 0 ? kbs * 1024 : 0);
     m_session->apply_settings(pack);
 }
 
 void SessionManager::setUploadLimitKBs(int kbs)
 {
     lt::settings_pack pack;
-    pack.set_int(lt::settings_pack::upload_rate_limit, kbs > 0 ? kbs * 1000 : 0);
+    pack.set_int(lt::settings_pack::upload_rate_limit, kbs > 0 ? kbs * 1024 : 0);
     m_session->apply_settings(pack);
 }
 

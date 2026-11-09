@@ -27,6 +27,11 @@ public:
     bool waitForSeedingToFinish() const;
     void setWaitForSeedingToFinish(bool enabled);
 
+    // Opening .torrent files and magnet links with LiteTorrent:
+    // -1 = never asked, 0 = declined, 1 = on.
+    int fileAssociation() const;
+    void setFileAssociation(int state);
+
     // L"ru" or L"en". Defaults to L"ru".
     std::wstring language() const;
     void setLanguage(const std::wstring& code);

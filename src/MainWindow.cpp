@@ -1,10 +1,13 @@
 #include "MainWindow.h"
 #include "AddTorrentDialog.h"
 #include "Localization.h"
+#include "FilesDialog.h"
+#include "Associations.h"
 
 #include <commctrl.h>
 #include <shellapi.h>
 #include <algorithm>
+#include <iterator>
 
 namespace {
 constexpr wchar_t kClassName[] = L"LiteTorrentMainWindow";
@@ -18,6 +21,17 @@ constexpr int ID_LANG_EN = 206;
 constexpr int ID_SHUTDOWN_CHECK = 207;
 constexpr int ID_LISTVIEW = 208;
 constexpr int ID_SHUTDOWN_CANCEL = 209;
+constexpr int ID_FILES = 210;
+constexpr int ID_MORE = 211;
+
+// "More" menu: download limits 300+i, upload limits 400+i, association 500.
+constexpr int ID_MENU_DOWN = 300;
+constexpr int ID_MENU_UP = 400;
+constexpr int ID_MENU_ASSOC = 500;
+constexpr int kDownPresets[] = {0, 512, 1024, 2048, 5120, 10240, 20480};   // KiB/s
+constexpr int kUpPresets[] = {0, 64, 128, 256, 512, 1024, 2048};           // KiB/s
+
+constexpr UINT WM_APP_DEFERRED = WM_APP + 1;
 
 constexpr wchar_t kPromptClassName[] = L"LiteTorrentShutdownPrompt";
 
@@ -36,6 +50,14 @@ HWND makeButton(HWND parent, HINSTANCE hInst, const std::wstring& text, int id, 
         0, 0, 0, 0, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), hInst, nullptr);
     SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(win::uiFont()), TRUE);
     return h;
+}
+
+// "2 MB/s", "512 KB/s" -- the same 1024-based units the list shows.
+std::wstring limitLabel(int kib)
+{
+    if (kib >= 1024 && kib % 1024 == 0)
+        return std::to_wstring(kib / 1024) + L" MB/s";
+    return std::to_wstring(kib) + L" KB/s";
 }
 
 std::wstring withSeconds(Localization::Key key, int seconds)
@@ -178,7 +200,7 @@ LRESULT MainWindow::wndProc(UINT msg, WPARAM wParam, LPARAM lParam)
     }
     case WM_GETMINMAXINFO: {
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-        mmi->ptMinTrackSize.x = win::px(700);
+        mmi->ptMinTrackSize.x = win::px(780);
         mmi->ptMinTrackSize.y = win::px(320);
         return 0;
     }
@@ -193,11 +215,18 @@ LRESULT MainWindow::wndProc(UINT msg, WPARAM wParam, LPARAM lParam)
             size_t len = 0;
             while (len < maxLen && text[len] != L'\0')
                 ++len;
-            if (len > 0)
-                addSource(std::wstring(text, len), m_settings.downloadDir());
+            // Added after this message returns, so the other copy is not
+            // kept waiting behind a possible message box.
+            if (len > 0) {
+                m_pendingSources.emplace_back(text, len);
+                postDeferred();
+            }
         }
         return TRUE;
     }
+    case WM_APP_DEFERRED:
+        runDeferred();
+        return 0;
     case WM_ENDSESSION:
         // Windows is shutting down or the user is logging off (this is
         // also how our own shutdown feature ends): save before we go.
@@ -224,6 +253,8 @@ void MainWindow::onCreate(HWND hwnd)
     m_pauseResumeBtn = makeButton(hwnd, m_hInst, L"", ID_PAUSE_RESUME);
     m_deleteBtn = makeButton(hwnd, m_hInst, L"", ID_DELETE);
     m_openFolderBtn = makeButton(hwnd, m_hInst, L"", ID_OPEN_FOLDER);
+    m_filesBtn = makeButton(hwnd, m_hInst, L"", ID_FILES);
+    m_moreBtn = makeButton(hwnd, m_hInst, L"", ID_MORE);
 
     m_langRuBtn = makeButton(hwnd, m_hInst, L"RU", ID_LANG_RU, BS_OWNERDRAW);
     m_langEnBtn = makeButton(hwnd, m_hInst, L"EN", ID_LANG_EN, BS_OWNERDRAW);
@@ -251,12 +282,11 @@ void MainWindow::onCreate(HWND hwnd)
         m_session.saveAllAndWait();
     };
 
+    // Called from inside the alert loop: a message box there would run a
+    // nested message loop whose timer re-enters that very loop. Defer it.
     m_session.onAddFailed = [this](bool duplicate, const std::wstring& message) {
-        const Localization& loc = Localization::instance();
-        MessageBoxW(m_hwnd,
-                    duplicate ? loc.t(Localization::DuplicateTorrent).c_str() : message.c_str(),
-                    loc.t(Localization::CouldntAddTorrentTitle).c_str(),
-                    MB_OK | (duplicate ? MB_ICONINFORMATION : MB_ICONWARNING));
+        m_pendingErrors.emplace_back(duplicate, message);
+        postDeferred();
     };
 
     Localization::instance().onLanguageChanged = [this] { retranslateUi(); };
@@ -270,6 +300,16 @@ void MainWindow::onCreate(HWND hwnd)
     layoutControls();
 
     m_session.restoreSavedTorrents();
+
+    // .torrent / magnet handling: refresh the registration (the exe may have
+    // moved since last time), or ask once on the very first start.
+    const int assocState = m_settings.fileAssociation();
+    if (assocState == 1) {
+        assoc::enable();
+    } else if (assocState < 0) {
+        m_pendingAssocQuestion = true;
+        postDeferred();
+    }
 
     SetTimer(hwnd, ID_TIMER_TICK, 1000, nullptr);
 }
@@ -298,7 +338,9 @@ void MainWindow::layoutControls()
     MoveWindow(m_addBtn, x, toolbarY, px(96), btnH, TRUE); x += px(96 + 14);
     MoveWindow(m_pauseResumeBtn, x, toolbarY, px(116), btnH, TRUE); x += px(116 + 6);
     MoveWindow(m_deleteBtn, x, toolbarY, px(96), btnH, TRUE); x += px(96 + 6);
-    MoveWindow(m_openFolderBtn, x, toolbarY, px(84), btnH, TRUE);
+    MoveWindow(m_openFolderBtn, x, toolbarY, px(84), btnH, TRUE); x += px(84 + 6);
+    MoveWindow(m_filesBtn, x, toolbarY, px(84), btnH, TRUE); x += px(84 + 14);
+    MoveWindow(m_moreBtn, x, toolbarY, px(84), btnH, TRUE);
 
     // Language toggle, pinned to the top-right corner.
     const int langBtnW = px(32), langBtnH = px(22);
@@ -326,6 +368,8 @@ void MainWindow::onCommand(int id, int notifyCode, HWND ctrl)
     case ID_PAUSE_RESUME: if (notifyCode == BN_CLICKED) onPauseResumeClicked(); break;
     case ID_DELETE: if (notifyCode == BN_CLICKED) onDeleteClicked(); break;
     case ID_OPEN_FOLDER: if (notifyCode == BN_CLICKED) onOpenFolderClicked(); break;
+    case ID_FILES: if (notifyCode == BN_CLICKED) onFilesClicked(); break;
+    case ID_MORE: if (notifyCode == BN_CLICKED) onMoreClicked(); break;
     case ID_LANG_RU: if (notifyCode == BN_CLICKED) onLanguageButtonClicked(false); break;
     case ID_LANG_EN: if (notifyCode == BN_CLICKED) onLanguageButtonClicked(true); break;
     case ID_SHUTDOWN_CHECK:
@@ -520,6 +564,7 @@ void MainWindow::updateToolbarEnabledState()
     EnableWindow(m_pauseResumeBtn, hasSelection);
     EnableWindow(m_deleteBtn, hasSelection);
     EnableWindow(m_openFolderBtn, hasSelection);
+    EnableWindow(m_filesBtn, hasSelection);
 
     const Localization& loc = Localization::instance();
     if (hasSelection) {
@@ -548,6 +593,17 @@ void MainWindow::updateStatusBar()
 {
     std::wstring down = win::formatSpeed(m_session.totalDownloadRateBps());
     std::wstring up = win::formatSpeed(m_session.totalUploadRateBps());
+    // Show an active speed limit next to the speed it caps.
+    auto withLimit = [](std::wstring& text, int kib) {
+        if (kib <= 0)
+            return;
+        std::wstring tag = Localization::instance().t(Localization::LimitTag);
+        const size_t p = tag.find(L"@LIMIT@");
+        if (p != std::wstring::npos) tag.replace(p, 7, limitLabel(kib));
+        text += L" " + tag;
+    };
+    withLimit(down, m_settings.downloadLimitKBs());
+    withLimit(up, m_settings.uploadLimitKBs());
 
     std::wstring text = Localization::instance().t(Localization::StatusLine);
     const size_t downPos = text.find(L"@DOWN@");
@@ -578,6 +634,8 @@ void MainWindow::retranslateUi()
     SetWindowTextW(m_addBtn, loc.t(Localization::AddButton).c_str());
     SetWindowTextW(m_deleteBtn, loc.t(Localization::DeleteButton).c_str());
     SetWindowTextW(m_openFolderBtn, loc.t(Localization::OpenFolderButton).c_str());
+    SetWindowTextW(m_filesBtn, loc.t(Localization::FilesButton).c_str());
+    SetWindowTextW(m_moreBtn, loc.t(Localization::MoreButton).c_str());
     SetWindowTextW(m_shutdownCheck, loc.t(Localization::ShutdownCheckbox).c_str());
 
     InvalidateRect(m_langRuBtn, nullptr, TRUE);
@@ -707,4 +765,178 @@ void MainWindow::bringToFront()
     if (IsIconic(m_hwnd))
         ShowWindow(m_hwnd, SW_RESTORE);
     SetForegroundWindow(m_hwnd);
+}
+
+// --- Files, the "More" menu, file associations -----------------------------
+
+void MainWindow::onFilesClicked()
+{
+    const TorrentInfo* info = m_list.selected();
+    if (!info)
+        return;
+    const std::wstring hash = info->infoHash;
+    const std::wstring name = info->name;
+    const Localization& loc = Localization::instance();
+
+    std::vector<TorrentFileEntry> files = m_session.files(hash);
+    if (files.empty()) {
+        MessageBoxW(m_hwnd, loc.t(Localization::FilesNotReady).c_str(),
+                    loc.t(Localization::FilesDialogTitle).c_str(), MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (showFilesDialog(m_hwnd, m_hInst, name, files))
+        m_session.setWantedFiles(hash, files);
+}
+
+void MainWindow::onMoreClicked()
+{
+    const Localization& loc = Localization::instance();
+
+    auto buildLimitMenu = [](const int* presets, size_t count, int baseId, int current) {
+        HMENU sub = CreatePopupMenu();
+        bool matched = false;
+        for (size_t i = 0; i < count; ++i) {
+            const int kib = presets[i];
+            const std::wstring label = kib == 0 ? Localization::instance().t(Localization::MenuNoLimit)
+                                                : limitLabel(kib);
+            UINT flags = MF_STRING;
+            if (kib == current) { flags |= MF_CHECKED; matched = true; }
+            AppendMenuW(sub, flags, static_cast<UINT_PTR>(baseId + static_cast<int>(i)), label.c_str());
+            if (i == 0)
+                AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+        }
+        if (!matched && current > 0) {
+            // A value set by hand in the registry: show it, ticked.
+            AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(sub, MF_STRING | MF_CHECKED | MF_DISABLED, 0, limitLabel(current).c_str());
+        }
+        return sub;
+    };
+
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(
+        buildLimitMenu(kDownPresets, std::size(kDownPresets), ID_MENU_DOWN, m_settings.downloadLimitKBs())),
+        loc.t(Localization::MenuDownloadLimit).c_str());
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(
+        buildLimitMenu(kUpPresets, std::size(kUpPresets), ID_MENU_UP, m_settings.uploadLimitKBs())),
+        loc.t(Localization::MenuUploadLimit).c_str());
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (m_settings.fileAssociation() == 1 ? MF_CHECKED : 0),
+                ID_MENU_ASSOC, loc.t(Localization::MenuOpenWith).c_str());
+
+    RECT rc;
+    GetWindowRect(m_moreBtn, &rc);
+    const int id = static_cast<int>(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+                                                   rc.left, rc.bottom, 0, m_hwnd, nullptr));
+    DestroyMenu(menu); // also destroys the submenus
+    if (id)
+        onMenuCommand(id);
+}
+
+void MainWindow::onMenuCommand(int id)
+{
+    if (id >= ID_MENU_DOWN && id < ID_MENU_DOWN + static_cast<int>(std::size(kDownPresets))) {
+        const int kib = kDownPresets[id - ID_MENU_DOWN];
+        m_settings.setDownloadLimitKBs(kib);
+        m_session.setDownloadLimitKBs(kib);
+    } else if (id >= ID_MENU_UP && id < ID_MENU_UP + static_cast<int>(std::size(kUpPresets))) {
+        const int kib = kUpPresets[id - ID_MENU_UP];
+        m_settings.setUploadLimitKBs(kib);
+        m_session.setUploadLimitKBs(kib);
+    } else if (id == ID_MENU_ASSOC) {
+        setFileAssociation(m_settings.fileAssociation() != 1);
+    }
+    updateStatusBar();
+}
+
+void MainWindow::setFileAssociation(bool on)
+{
+    m_settings.setFileAssociation(on ? 1 : 0);
+    if (!on) {
+        assoc::disable();
+        return;
+    }
+    assoc::enable();
+    if (!assoc::ownedByAnotherApp())
+        return;
+
+    // Windows keeps the user's own earlier choice; it can only be changed
+    // in Settings. Say so, and offer to open the right page.
+    const Localization& loc = Localization::instance();
+    const std::wstring title = loc.t(Localization::AssocTitle);
+    const std::wstring text = loc.t(Localization::AssocTakenText);
+    const std::wstring open = loc.t(Localization::AssocOpenSettings);
+    const std::wstring close = loc.t(Localization::AddDialogCancel);
+    const TASKDIALOG_BUTTON buttons[] = {{IDYES, open.c_str()}, {IDCANCEL, close.c_str()}};
+    TASKDIALOGCONFIG cfg{};
+    cfg.cbSize = sizeof(cfg);
+    cfg.hwndParent = m_hwnd;
+    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    cfg.pszWindowTitle = title.c_str();
+    cfg.pszMainIcon = TD_INFORMATION_ICON;
+    cfg.pszContent = text.c_str();
+    cfg.cButtons = 2;
+    cfg.pButtons = buttons;
+    cfg.nDefaultButton = IDYES;
+    int choice = IDCANCEL;
+    if (SUCCEEDED(TaskDialogIndirect(&cfg, &choice, nullptr, nullptr)) && choice == IDYES)
+        assoc::openDefaultAppsSettings();
+}
+
+void MainWindow::askAboutFileAssociation()
+{
+    const Localization& loc = Localization::instance();
+    const std::wstring title = loc.t(Localization::AssocTitle);
+    const std::wstring text = loc.t(Localization::AssocQuestion);
+    const std::wstring yes = loc.t(Localization::AssocYes);
+    const std::wstring no = loc.t(Localization::AssocNo);
+    const TASKDIALOG_BUTTON buttons[] = {{IDYES, yes.c_str()}, {IDNO, no.c_str()}};
+    TASKDIALOGCONFIG cfg{};
+    cfg.cbSize = sizeof(cfg);
+    cfg.hwndParent = m_hwnd;
+    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    cfg.pszWindowTitle = title.c_str();
+    cfg.pszMainIcon = TD_INFORMATION_ICON;
+    cfg.pszContent = text.c_str();
+    cfg.cButtons = 2;
+    cfg.pButtons = buttons;
+    cfg.nDefaultButton = IDYES;
+    int choice = IDNO;
+    if (FAILED(TaskDialogIndirect(&cfg, &choice, nullptr, nullptr)))
+        return; // ask again next time
+    // Closing the question counts as "no": it is asked only once either way.
+    setFileAssociation(choice == IDYES);
+}
+
+void MainWindow::postDeferred()
+{
+    if (m_deferredPosted)
+        return;
+    m_deferredPosted = true;
+    PostMessageW(m_hwnd, WM_APP_DEFERRED, 0, 0);
+}
+
+void MainWindow::runDeferred()
+{
+    m_deferredPosted = false;
+
+    std::vector<std::wstring> sources;
+    sources.swap(m_pendingSources);
+    for (const auto& s : sources)
+        addSource(s, m_settings.downloadDir());
+
+    std::vector<std::pair<bool, std::wstring>> errors;
+    errors.swap(m_pendingErrors);
+    const Localization& loc = Localization::instance();
+    for (const auto& e : errors) {
+        MessageBoxW(m_hwnd,
+                    e.first ? loc.t(Localization::DuplicateTorrent).c_str() : e.second.c_str(),
+                    loc.t(Localization::CouldntAddTorrentTitle).c_str(),
+                    MB_OK | (e.first ? MB_ICONINFORMATION : MB_ICONWARNING));
+    }
+
+    if (m_pendingAssocQuestion) {
+        m_pendingAssocQuestion = false;
+        askAboutFileAssociation();
+    }
 }
