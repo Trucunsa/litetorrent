@@ -3,8 +3,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
-#include <chrono>
 
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/magnet_uri.hpp>
@@ -15,27 +13,32 @@
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/read_resume_data.hpp>
 #include <libtorrent/write_resume_data.hpp>
-#include <libtorrent/torrent_flags.hpp>
+
+#include <fstream>
+#include <iterator>
+#include <thread>
+#include <chrono>
+#include <shlobj.h>
 
 namespace {
 
 std::wstring stateToString(lt::torrent_status::state_t s, bool paused, bool isFinished)
 {
-    // Internal tags only; the UI maps them to localized text.
     if (paused)
-        return L"Paused";
+        return L"Paused"; // placeholder -- state text is looked up fresh from Localization by the UI layer
     switch (s) {
     case lt::torrent_status::checking_files:
-    case lt::torrent_status::checking_resume_data:
         return L"Checking";
     case lt::torrent_status::downloading_metadata:
-        return L"Metadata";
+        return L"Fetching metadata";
     case lt::torrent_status::downloading:
         return L"Downloading";
     case lt::torrent_status::finished:
         return L"Finished";
     case lt::torrent_status::seeding:
         return L"Seeding";
+    case lt::torrent_status::checking_resume_data:
+        return L"Checking";
     default:
         return isFinished ? L"Finished" : L"Idle";
     }
@@ -57,6 +60,28 @@ std::wstring hashKey(const lt::sha1_hash& h)
     return out;
 }
 
+// %APPDATA%\LiteTorrent\resume -- one "<info hash>.fastresume" file per
+// torrent, holding everything needed to pick it up again after a restart
+// (the torrent's metadata, save folder, pause state and which pieces are
+// already complete).
+std::filesystem::path resumeDir()
+{
+    std::filesystem::path dir;
+    PWSTR appData = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &appData))) {
+        dir = appData;
+        CoTaskMemFree(appData);
+    }
+    dir /= L"LiteTorrent";
+    dir /= L"resume";
+    return dir;
+}
+
+std::filesystem::path resumeFile(const std::wstring& hashHex)
+{
+    return resumeDir() / (hashHex + L".fastresume");
+}
+
 bool startsWithMagnet(const std::wstring& s)
 {
     const std::wstring prefix = L"magnet:";
@@ -73,13 +98,74 @@ bool startsWithMagnet(const std::wstring& s)
 
 SessionManager::SessionManager()
 {
-    m_stateDir = win::dataDir() + L"\\torrents";
-    std::error_code ec;
-    std::filesystem::create_directories(m_stateDir, ec);
     applySessionDefaults();
 }
 
-SessionManager::~SessionManager() = default;
+SessionManager::~SessionManager()
+{
+    saveAllAndWait();
+}
+
+// --- Persistence ------------------------------------------------------------
+
+void SessionManager::restoreSavedTorrents()
+{
+    std::error_code fsEc;
+    for (const auto& entry : std::filesystem::directory_iterator(resumeDir(), fsEc)) {
+        if (entry.path().extension() != L".fastresume")
+            continue;
+
+        std::ifstream in(entry.path(), std::ios::binary);
+        std::vector<char> buf((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (buf.empty())
+            continue;
+
+        lt::error_code ec;
+        lt::add_torrent_params atp = lt::read_resume_data(buf, ec);
+        if (ec)
+            continue; // unreadable file: skip it rather than refuse to start
+        m_session->async_add_torrent(std::move(atp));
+    }
+}
+
+void SessionManager::requestResumeData(bool onlyIfModified)
+{
+    for (const lt::torrent_handle& h : m_session->get_torrents()) {
+        if (!h.is_valid())
+            continue;
+        lt::resume_data_flags_t flags = lt::torrent_handle::save_info_dict;
+        if (onlyIfModified)
+            flags |= lt::torrent_handle::only_if_modified;
+        else
+            flags |= lt::torrent_handle::flush_disk_cache;
+        h.save_resume_data(flags);
+        ++m_pendingSaves;
+    }
+}
+
+void SessionManager::saveAllAndWait()
+{
+    if (m_savedOnExit || !m_session)
+        return;
+    m_savedOnExit = true;
+
+    // This runs while the window is going away (or already gone): the UI
+    // must not be called back from here on.
+    onTorrentsChanged = nullptr;
+    onTorrentFinished = nullptr;
+    onAddFailed = nullptr;
+
+    // Stop transfers first so nothing changes underneath the snapshot.
+    m_session->pause();
+    pollAlerts(); // settle the counter for requests already in flight
+    requestResumeData(false);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (m_pendingSaves > 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        pollAlerts();
+    }
+}
 
 void SessionManager::applySessionDefaults()
 {
@@ -105,8 +191,10 @@ void SessionManager::applySessionDefaults()
     m_session = std::make_unique<lt::session>(params);
 }
 
-bool SessionManager::addTorrent(const std::wstring& source, const std::wstring& saveDir, std::wstring* errorOut)
+bool SessionManager::addTorrent(const std::wstring& source, const std::wstring& saveDir,
+                                std::wstring* errorOut, bool* duplicateOut)
 {
+    if (duplicateOut) *duplicateOut = false;
     std::error_code fsEc;
     std::filesystem::create_directories(saveDir, fsEc);
 
@@ -132,6 +220,17 @@ bool SessionManager::addTorrent(const std::wstring& source, const std::wstring& 
         atp.ti = ti;
     }
 
+    // The engine quietly ignores a torrent it already has; tell the user
+    // instead of leaving them wondering why nothing happened.
+    const std::wstring key = hashKey(atp.ti ? atp.ti->info_hashes().get_best()
+                                            : atp.info_hashes.get_best());
+    for (const auto& t : m_torrents) {
+        if (t.infoHash == key) {
+            if (duplicateOut) *duplicateOut = true;
+            return false;
+        }
+    }
+
     m_session->async_add_torrent(std::move(atp));
     return true;
 }
@@ -144,8 +243,8 @@ void SessionManager::removeTorrent(const std::wstring& infoHash, bool deleteFile
             if (deleteFiles)
                 flags |= lt::session::delete_files;
             m_session->remove_torrent(t.handle, flags);
-            std::error_code ec;
-            std::filesystem::remove(std::filesystem::path(m_stateDir) / (t.infoHash + L".resume"), ec);
+            std::error_code fsEc;
+            std::filesystem::remove(resumeFile(infoHash), fsEc);
             break;
         }
     }
@@ -155,7 +254,10 @@ void SessionManager::pauseTorrent(const std::wstring& infoHash)
 {
     for (auto& t : m_torrents) {
         if (t.infoHash == infoHash) {
+            // Without clearing auto_managed the engine would un-pause it.
+            t.handle.unset_flags(lt::torrent_flags::auto_managed);
             t.handle.pause();
+            m_ticksSinceSave = 1000; // save on the next tick
             break;
         }
     }
@@ -165,7 +267,9 @@ void SessionManager::resumeTorrent(const std::wstring& infoHash)
 {
     for (auto& t : m_torrents) {
         if (t.infoHash == infoHash) {
+            t.handle.set_flags(lt::torrent_flags::auto_managed);
             t.handle.resume();
+            m_ticksSinceSave = 1000;
             break;
         }
     }
@@ -210,8 +314,10 @@ bool SessionManager::allDownloadsFinished(bool waitForSeeding) const
         return false; // nothing to call "finished" -- caller treats empty queue as idle
 
     for (const auto& t : m_torrents) {
+        // A torrent that stopped with an error (disk full, folder gone...)
+        // has NOT finished: never treat it as a reason to shut down.
         if (t.hasError)
-            return false; // a broken torrent is not "finished": never shut down over it
+            return false;
         if (!t.isFinished)
             return false;
         if (waitForSeeding && t.state == L"Seeding")
@@ -220,102 +326,15 @@ bool SessionManager::allDownloadsFinished(bool waitForSeeding) const
     return true;
 }
 
-bool SessionManager::anyErrors() const
-{
-    for (const auto& t : m_torrents)
-        if (t.hasError)
-            return true;
-    return false;
-}
-
 void SessionManager::tick()
 {
     m_session->post_torrent_updates();
     pollAlerts();
 
-    // Every minute, save resume data of torrents that changed.
+    // Save progress once a minute, so a crash or power cut loses little.
     if (++m_ticksSinceSave >= 60) {
         m_ticksSinceSave = 0;
-        for (const auto& t : m_torrents)
-            requestSave(t.handle, true);
-    }
-}
-
-void SessionManager::requestSave(const lt::torrent_handle& h, bool onlyIfModified)
-{
-    if (!h.is_valid())
-        return;
-    lt::resume_data_flags_t flags = lt::torrent_handle::save_info_dict;
-    if (onlyIfModified)
-        flags |= lt::torrent_handle::only_if_modified;
-    h.save_resume_data(flags);
-}
-
-void SessionManager::handleSaveAlert(lt::alert* a)
-{
-    auto* sr = lt::alert_cast<lt::save_resume_data_alert>(a);
-    if (!sr || !sr->handle.is_valid())
-        return;
-    const std::wstring name = hashKey(sr->handle.info_hashes().get_best()) + L".resume";
-    const std::vector<char> buf = lt::write_resume_data_buf(sr->params);
-    const auto finalPath = std::filesystem::path(m_stateDir) / name;
-    const auto tmpPath = std::filesystem::path(m_stateDir) / (name + L".tmp");
-    {
-        std::ofstream f(tmpPath, std::ios::binary | std::ios::trunc);
-        if (!f)
-            return;
-        f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
-        if (!f)
-            return;
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmpPath, finalPath, ec); // atomic replace on the same volume
-    if (ec) {
-        std::filesystem::remove(finalPath, ec);
-        std::filesystem::rename(tmpPath, finalPath, ec);
-    }
-}
-
-void SessionManager::restoreSaved()
-{
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(m_stateDir, ec)) {
-        if (entry.path().extension() != L".resume")
-            continue;
-        std::ifstream f(entry.path(), std::ios::binary);
-        if (!f)
-            continue;
-        std::vector<char> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        lt::error_code lec;
-        lt::add_torrent_params atp = lt::read_resume_data(data, lec);
-        if (lec || atp.save_path.empty())
-            continue;
-        m_session->async_add_torrent(std::move(atp));
-    }
-}
-
-void SessionManager::saveAll(int timeoutMs)
-{
-    int pending = 0;
-    for (const lt::torrent_handle& h : m_session->get_torrents()) {
-        if (!h.is_valid())
-            continue;
-        requestSave(h, false);
-        ++pending;
-    }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-    while (pending > 0 && std::chrono::steady_clock::now() < deadline) {
-        m_session->wait_for_alert(lt::milliseconds(100));
-        std::vector<lt::alert*> alerts;
-        m_session->pop_alerts(&alerts);
-        for (lt::alert* a : alerts) {
-            if (lt::alert_cast<lt::save_resume_data_alert>(a)) {
-                handleSaveAlert(a);
-                --pending;
-            } else if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
-                --pending;
-            }
-        }
+        requestResumeData(true);
     }
 }
 
@@ -350,7 +369,12 @@ void SessionManager::pollAlerts()
                 t.uploadRateBps = st.upload_payload_rate;
                 t.numPeers = st.num_peers;
                 t.numSeeds = st.num_seeds;
-                t.isPaused = static_cast<bool>(st.flags & lt::torrent_flags::paused);
+                // "paused + auto-managed" means the engine is holding the
+                // torrent in its queue, not that the user paused it.
+                const bool pausedFlag = static_cast<bool>(st.flags & lt::torrent_flags::paused);
+                const bool autoManaged = static_cast<bool>(st.flags & lt::torrent_flags::auto_managed);
+                t.isPaused = pausedFlag && !autoManaged;
+                t.isQueued = pausedFlag && autoManaged;
                 t.isFinished = (st.state == lt::torrent_status::finished ||
                                 st.state == lt::torrent_status::seeding);
                 t.hasError = st.errc ? true : false;
@@ -359,7 +383,7 @@ void SessionManager::pollAlerts()
                 t.savePath = win::utf8ToWide(st.save_path);
                 t.isChecking = (st.state == lt::torrent_status::checking_files ||
                                 st.state == lt::torrent_status::checking_resume_data);
-                t.needsMetadata = (st.state == lt::torrent_status::downloading_metadata);
+                t.needsMetadata = !st.has_metadata;
             }
         } else if (auto* fin = lt::alert_cast<lt::torrent_finished_alert>(a)) {
             if (onTorrentFinished) {
@@ -372,23 +396,34 @@ void SessionManager::pollAlerts()
                 onTorrentFinished(name);
             }
             changed = true;
-        } else if (auto* rem = lt::alert_cast<lt::torrent_removed_alert>(a)) {
-            // Make sure no late resume-data write leaves a stale file behind.
-            std::error_code ec;
-            std::filesystem::remove(std::filesystem::path(m_stateDir) /
-                                    (hashKey(rem->info_hashes.get_best()) + L".resume"), ec);
-            changed = true;
+        } else if (auto* rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
+            if (m_pendingSaves > 0) --m_pendingSaves;
+            const std::vector<char> buf = lt::write_resume_data_buf(rd->params);
+            std::error_code fsEc;
+            std::filesystem::create_directories(resumeDir(), fsEc);
+            // Write to a temporary name and rename, so an interrupted
+            // write can never leave a half-written resume file behind.
+            const std::filesystem::path target = resumeFile(hashKey(rd->params.info_hashes.get_best()));
+            std::filesystem::path tmp = target;
+            tmp += L".tmp";
+            {
+                std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+                out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+            }
+            std::filesystem::rename(tmp, target, fsEc);
+        } else if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
+            if (m_pendingSaves > 0) --m_pendingSaves; // usually just "nothing changed"
         } else if (auto* added = lt::alert_cast<lt::add_torrent_alert>(a)) {
             if (added->error) {
-                if (onAddFailed) {
-                    const bool dup = added->error == lt::errors::duplicate_torrent;
-                    onAddFailed(dup, win::utf8ToWide(added->error.message()));
-                }
+                if (onAddFailed)
+                    onAddFailed(added->error == lt::errors::duplicate_torrent,
+                                win::utf8ToWide(added->error.message()));
             } else {
-                requestSave(added->handle, false); // so a new torrent survives a crash
+                m_ticksSinceSave = 1000; // record the new torrent right away
             }
-        } else if (lt::alert_cast<lt::save_resume_data_alert>(a)) {
-            handleSaveAlert(a);
+        } else if (lt::alert_cast<lt::torrent_removed_alert>(a)) {
+            // Handled by letting the next state_update prune below.
+            changed = true;
         } else if (auto* err = lt::alert_cast<lt::torrent_error_alert>(a)) {
             std::wstring hash = hashKey(err->handle.info_hashes().get_best());
             for (auto& t : m_torrents) {

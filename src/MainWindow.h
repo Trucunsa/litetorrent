@@ -5,20 +5,12 @@
 #include "ShutdownManager.h"
 #include "AppSettings.h"
 #include "TorrentListView.h"
-#include "CountdownDialog.h"
-#include <vector>
 #include <shellapi.h> // HDROP
 
 // The app's single window. Plain Win32: no Qt, no moc, no signals/slots --
 // every reaction (button clicks, selection changes, timer ticks) is
 // dispatched from one WndProc, and SessionManager/ShutdownManager are
 // driven by std::function callbacks exactly as they were in the Qt build.
-// Window class of the main window; the second process looks it up to hand
-// over a .torrent / magnet argument (see main.cpp).
-constexpr wchar_t kMainWindowClass[] = L"LiteTorrentMainWindow";
-// dwData tag of the WM_COPYDATA message that carries that argument.
-constexpr ULONG_PTR kCopyDataOpen = 0x4C544F50; // "LTOP"
-
 class MainWindow
 {
 public:
@@ -26,6 +18,10 @@ public:
     void show(int nCmdShow);
 
     HWND hwnd() const { return m_hwnd; }
+
+    // Window class name; a second copy of the app uses it to find the
+    // running one and hand its command-line argument over.
+    static const wchar_t* className();
 
     // For a .torrent path (or magnet link) handed to the process on the
     // command line -- Windows launches the app this way when a .torrent
@@ -42,11 +38,6 @@ private:
     LRESULT onNotify(NMHDR* hdr);
     void onDropFiles(HDROP hDrop);
     bool onDrawItem(DRAWITEMSTRUCT* dis);
-
-    void onDpiChanged(int newDpi, const RECT* suggested);
-    void onCopyData(const COPYDATASTRUCT* cds);
-    void onDeferred();
-    void flushState(int timeoutMs);
 
     void onAddClicked();
     void onPauseResumeClicked();
@@ -65,6 +56,11 @@ private:
     void retranslateUi();
     void checkShutdownCondition();
     void layoutControls();
+    void cancelShutdownByUser();
+    void showShutdownPrompt(int seconds);
+    void updateShutdownPrompt(int seconds);
+    void closeShutdownPrompt();
+    void bringToFront();
 
     HWND m_hwnd = nullptr;
     HINSTANCE m_hInst = nullptr;
@@ -74,12 +70,6 @@ private:
     AppSettings m_settings;
 
     TorrentListView m_list;
-    CountdownDialog m_countdown;
-
-    // Work queued from callbacks that must not show UI or add torrents
-    // while libtorrent's alert list is being walked.
-    std::vector<std::wstring> m_pendingOpen;
-    std::vector<std::pair<bool, std::wstring>> m_pendingErrors; // {isDuplicate, text}
 
     HWND m_addBtn = nullptr;
     HWND m_pauseResumeBtn = nullptr;
@@ -91,4 +81,14 @@ private:
 
     HWND m_statusStatic = nullptr;
     HWND m_shutdownCheck = nullptr;
+
+    // The visible countdown window (and its two children).
+    HWND m_shutdownPrompt = nullptr;
+    HWND m_shutdownPromptText = nullptr;
+    HWND m_shutdownPromptButton = nullptr;
+
+    // The shutdown box only fires for downloads that were still running
+    // at some point after it was ticked -- never for a list that was
+    // already complete when the user ticked it.
+    bool m_sawUnfinished = false;
 };

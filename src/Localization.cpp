@@ -25,6 +25,9 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
     /* StateDownloading            */ {L"Загрузка", L"Downloading"},
     /* StateSeeding                */ {L"Раздача", L"Seeding"},
     /* StatePaused                 */ {L"Пауза", L"Paused"},
+    /* StateChecking               */ {L"Проверка", L"Checking"},
+    /* StateQueued                 */ {L"В очереди", L"Queued"},
+    /* StateMetadata               */ {L"Получение метаданных", L"Fetching metadata"},
     /* StateErrorPrefix            */ {L"Ошибка: ", L"Error: "},
 
     /* StatusLine                  */ {L"↓ @DOWN@   ↑ @UP@   @COUNT@ задач",
@@ -37,6 +40,11 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
                                          L"(add a torrent or uncheck the box to cancel)"},
 
     /* ShutdownCheckbox            */ {L"Выключить ПК после завершения загрузок", L"Shut down PC when all downloads finish"},
+    /* ShutdownPromptTitle         */ {L"Выключение компьютера", L"Shutting down"},
+    /* ShutdownPromptText          */ {L"Все загрузки завершены.\nКомпьютер выключится через @SECONDS@ с.",
+                                         L"All downloads have finished.\nThe PC will shut down in @SECONDS@ s."},
+    /* ShutdownPromptCancel        */ {L"Отменить выключение", L"Cancel shutdown"},
+    /* DuplicateTorrent            */ {L"Этот торрент уже есть в списке.", L"This torrent is already in the list."},
 
     /* EmptyStateTitle             */ {L"Пока нет задач", L"No tasks yet"},
     /* EmptyStateHint              */ {L"Перетащите .torrent-файл в это окно или добавьте по magnet-ссылке",
@@ -58,19 +66,10 @@ const wchar_t* const kStrings[Localization::KeyCount][2] = {
     /* TorrentFilesFilter          */ {L"Файлы торрентов (*.torrent)", L"Torrent files (*.torrent)"},
     /* CouldntAddTorrentTitle      */ {L"Не удалось добавить торрент", L"Couldn't add torrent"},
     /* RemoveFilesQuestionTitle    */ {L"Удаление задачи", L"Removing task"},
-    /* RemoveFilesQuestion         */ {L"Удалить задачу. Удалить также скачанные файлы с диска?", L"Remove this task. Also delete the downloaded files from disk?"},
+    /* RemoveFilesQuestion         */ {L"Удалить также файлы с диска?", L"Also delete the downloaded files from disk?"},
     /* YesButton                   */ {L"Да, с файлами", L"Yes, with files"},
     /* NoButton                    */ {L"Нет, только из списка", L"No, list only"},
     /* ChooseFolderTitle           */ {L"Папка для сохранения", L"Save-to folder"},
-
-    /* StateChecking               */ {L"Проверка файлов", L"Checking files"},
-    /* StateMetadata               */ {L"Получение метаданных", L"Fetching metadata"},
-    /* AlreadyInListMessage        */ {L"Этот торрент уже есть в списке.", L"This torrent is already in the list."},
-    /* ShutdownBlockedByError      */ {L"Выключение отложено: у одной из загрузок ошибка. Исправьте её или удалите задачу.",
-                                         L"Shutdown on hold: a download has an error. Fix it or remove the task."},
-    /* CountdownTitle              */ {L"Выключение компьютера", L"Shutting down"},
-    /* CancelShutdownButton        */ {L"Отменить выключение", L"Cancel shutdown"},
-    /* CancelButton                */ {L"Отмена", L"Cancel"},
 };
 }
 

@@ -6,28 +6,36 @@
 
 namespace {
 
-// A second launch (typically a double-click on a .torrent while the app is
-// already running) hands its argument to the running window and exits.
-bool forwardToRunningInstance(const std::wstring& arg)
+// If LiteTorrent is already running, gives it `argument` (a .torrent path
+// or magnet link; may be empty), brings its window forward and returns
+// true -- the caller then simply exits. Two copies would mean two separate
+// lists fighting over the same network port and the same resume files.
+bool handOverToRunningInstance(const std::wstring& argument)
 {
-    for (int attempt = 0; attempt < 50; ++attempt) { // the first instance may still be starting up
-        HWND target = FindWindowW(kMainWindowClass, nullptr);
-        if (target) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(target, &pid);
-            AllowSetForegroundWindow(pid);
-
-            COPYDATASTRUCT cds{};
-            cds.dwData = kCopyDataOpen;
-            cds.cbData = static_cast<DWORD>((arg.size() + 1) * sizeof(wchar_t));
-            cds.lpData = const_cast<wchar_t*>(arg.c_str());
-            DWORD_PTR result = 0;
-            return SendMessageTimeoutW(target, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
-                                       SMTO_ABORTIFHUNG, 5000, &result) != 0;
-        }
-        Sleep(100);
+    HWND existing = nullptr;
+    // The other copy may itself still be starting up; give it a moment.
+    for (int attempt = 0; attempt < 30 && !existing; ++attempt) {
+        existing = FindWindowW(MainWindow::className(), nullptr);
+        if (!existing)
+            Sleep(100);
     }
-    return false;
+    if (!existing)
+        return false;
+
+    COPYDATASTRUCT cds{};
+    cds.dwData = 1;
+    cds.cbData = static_cast<DWORD>((argument.size() + 1) * sizeof(wchar_t));
+    cds.lpData = const_cast<wchar_t*>(argument.c_str());
+
+    // Lets the running copy take the foreground when it handles the message.
+    DWORD pid = 0;
+    GetWindowThreadProcessId(existing, &pid);
+    AllowSetForegroundWindow(pid);
+
+    DWORD_PTR result = 0;
+    SendMessageTimeoutW(existing, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
+                        SMTO_ABORTIFHUNG, 5000, &result);
+    return true;
 }
 
 } // namespace
@@ -36,45 +44,64 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow)
 {
     // Windows launches the app with the file's path as argv[1] when a
     // .torrent file is double-clicked or sent through "Open with ->
-    // LiteTorrent".
-    std::wstring arg;
+    // LiteTorrent" -- there's no separate "received a file" event.
+    std::wstring argument;
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
         if (argc > 1)
-            arg = argv[1];
+            argument = argv[1];
         LocalFree(argv);
     }
-
-    // One window per user session: if LiteTorrent is already running, pass
-    // the argument over to it and quit.
-    HANDLE singleton = CreateMutexW(nullptr, FALSE, L"Local\\LiteTorrent.SingleInstance");
-    if (singleton && GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (forwardToRunningInstance(arg))
-            return 0;
-        // The other instance did not answer; fall through and run on our own.
+    // A relative path only means something in *this* process's working
+    // directory, so make it absolute before it can travel to another copy.
+    if (!argument.empty() && _wcsnicmp(argument.c_str(), L"magnet:", 7) != 0) {
+        wchar_t full[32768];
+        const DWORD n = GetFullPathNameW(argument.c_str(), 32768, full, nullptr);
+        if (n > 0 && n < 32768)
+            argument.assign(full, n);
     }
 
-    // Needed for the folder-picker (IFileDialog) used by the Add-torrent
-    // window; harmless to call even on paths that never open it.
+    // One copy per user session.
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\LiteTorrent.SingleInstance");
+    if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (handOverToRunningInstance(argument)) {
+            CloseHandle(mutex);
+            return 0;
+        }
+        // The other copy never showed a window (it is probably on its way
+        // out): carry on and start normally.
+    }
+
+    // Needed for the folder picker (IFileDialog) used by the Add-torrent
+    // window; harmless on paths that never open it.
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-    MainWindow window;
-    if (!window.create(hInstance))
-        return 1;
-    window.show(nCmdShow);
+    int exitCode = 0;
+    {
+        MainWindow window;
+        if (!window.create(hInstance))
+            return 1;
+        window.show(nCmdShow);
 
-    if (!arg.empty())
-        window.openFromCommandLine(arg);
+        if (!argument.empty())
+            window.openFromCommandLine(argument);
 
-    MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        MSG msg;
+        while (GetMessageW(&msg, nullptr, 0, 0)) {
+            // Keyboard handling (Tab, Enter, Esc) for the small secondary
+            // windows, e.g. the shutdown countdown.
+            HWND root = GetAncestor(msg.hwnd, GA_ROOT);
+            if (root && root != window.hwnd() && IsDialogMessageW(root, &msg))
+                continue;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        exitCode = static_cast<int>(msg.wParam);
     }
 
     CoUninitialize();
-    if (singleton)
-        CloseHandle(singleton);
-    return static_cast<int>(msg.wParam);
+    if (mutex)
+        CloseHandle(mutex);
+    return exitCode;
 }
