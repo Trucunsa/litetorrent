@@ -117,6 +117,8 @@ ci/package.sh                             # -> dist/LiteTorrent-Windows-x64.zip
 
 `ci/fetch-sysroot.sh` downloads the MSYS2 packages `mingw-w64-x86_64-boost` 1.92.0-4 and `mingw-w64-x86_64-openssl` 3.6.5-1 from repo.msys2.org and checks their SHA-256 before unpacking. `build.sh` downloads libtorrent 2.0.11 itself, builds it, then builds and links the app. If your distribution's `x86_64-w64-mingw32-g++` defaults to win32 threads, switch it to the posix variant (`update-alternatives`), as the workflow does.
 
+**Publishing a release:** commit `release-notes/vX.Y.Z.md`, then on GitHub open Releases → "Draft a new release", type the new tag `vX.Y.Z`, and publish. The workflow builds that tag and, about ten minutes later, attaches the zip and replaces the release text with the notes file, the build-log link and the SHA-256. Pushing a `vX.Y.Z` tag with git does the same.
+
 Building natively on Windows with MSYS2 should work with the same flags but has not been tried.
 
 ## How this was made

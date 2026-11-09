@@ -3,8 +3,10 @@
 #
 # - every push and pull request: build, and attach the zip to the run
 #   (Actions tab -> the run -> "Artifacts");
-# - a pushed tag such as v1.2.0: also create the GitHub Release with the zip,
-#   using release-notes/<tag>.md as its text and adding the exe's SHA-256.
+# - a release published on GitHub's website with a new tag such as v1.2.0
+#   (or a pushed v* tag): build that tag, attach the zip to the release and
+#   set its text from release-notes/<tag>.md plus the build-log link and the
+#   exe's SHA-256.
 name: Build
 
 on:
@@ -12,10 +14,18 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
 
+# A release created on the website also creates its tag; never let the two
+# resulting runs publish at the same time.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write   # needed only to create the release on tags
+  contents: write   # needed only to publish the release
 
 jobs:
   windows-x64:
@@ -65,5 +75,11 @@ jobs:
             echo "SHA-256 of \`litetorrent.exe\`:"
             echo "\`$(cut -d' ' -f1 dist/litetorrent.exe.sha256)\`"
           } > dist/notes.md
-          gh release create "$GITHUB_REF_NAME" dist/LiteTorrent-Windows-x64.zip \
-            --title "LiteTorrent ${GITHUB_REF_NAME#v}" --notes-file dist/notes.md
+          title="LiteTorrent ${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/LiteTorrent-Windows-x64.zip --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "$title" --notes-file dist/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/LiteTorrent-Windows-x64.zip \
+              --title "$title" --notes-file dist/notes.md
+          fi
